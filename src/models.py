@@ -3,8 +3,16 @@
 from typing import List, Optional
 import numpy as np
 from sklearn.linear_model import Ridge
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 
 from . import config, features
+
+# =============================================================================
+# Traditional SIFT based model with cascaded regression 
+# =============================================================================
 
 
 class CascadedRidgeRegressor:
@@ -118,3 +126,80 @@ class CascadedRidgeRegressor:
             current = current + delta
 
         return current
+    
+
+
+# =============================================================================
+# Deep Learning — direct landmark regression CNN
+# =============================================================================
+
+
+class LandmarkCNN(nn.Module):
+    """
+    Small convolutional network for direct landmark regression.
+
+    Predicts 5 landmarks × 2 coordinates = 10 outputs per image, in the
+    normalised range [-1, 1] (relative to image centre, scaled by half-image).
+
+    Architecture: 4 conv blocks (Conv-BN-ReLU-MaxPool) reducing 256→16,
+    global average pool, two FC layers with dropout. ~500K parameters.
+
+    Designed to be compact enough to train in <30 min on a Colab T4
+    while having sufficient capacity for ~3K training images.
+    """
+
+    def __init__(self, n_landmarks: int = 5, dropout: float = 0.3) -> None:
+        super().__init__()
+        self.n_landmarks = n_landmarks
+        out_dim = n_landmarks * 2
+
+        def block(in_c, out_c):
+            return nn.Sequential(
+                nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2),
+            )
+
+        self.features = nn.Sequential(
+            block(3,   32),    # 256 -> 128
+            block(32,  64),    # 128 -> 64
+            block(64,  128),   # 64 -> 32
+            block(128, 256),   # 32 -> 16
+        )
+        self.pool = nn.AdaptiveAvgPool2d(1)  # 16x16 -> 1x1
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(256, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(256, out_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """:param x: (B, 3, H, W) float in roughly [-2, 2] (post-normalisation)
+        :return: (B, n_landmarks, 2) predictions in normalised [-1, 1] coords
+        """
+        x = self.features(x)
+        x = self.pool(x)
+        x = self.head(x)
+        return x.view(-1, self.n_landmarks, 2)
+
+
+def points_to_normalised(points: np.ndarray, image_size: int) -> np.ndarray:
+    """
+    Convert pixel coordinates to normalised [-1, 1] (centred on image).
+
+    Image centre = (size/2, size/2) maps to (0, 0); corners to (±1, ±1).
+    This makes the regression target scale-free and well-behaved for L1/L2 loss.
+
+    :param points: (..., 2) pixel coordinates.
+    :param image_size: side length in pixels (assumed square).
+    :return: same shape as input, normalised.
+    """
+    return (points - image_size / 2) / (image_size / 2)
+
+
+def points_to_pixels(norm_points: np.ndarray, image_size: int) -> np.ndarray:
+    """Inverse of points_to_normalised."""
+    return norm_points * (image_size / 2) + image_size / 2

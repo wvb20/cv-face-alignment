@@ -47,3 +47,111 @@ def get_split() -> Tuple[np.ndarray, np.ndarray]:
     val_idx, train_idx = perm[:n_val], perm[n_val:]
     np.savez(config.SPLIT_NPZ, train_idx=train_idx, val_idx=val_idx)
     return train_idx, val_idx
+
+
+# =============================================================================
+# PyTorch Dataset with affine augmentation
+# =============================================================================
+
+import torch
+from torch.utils.data import Dataset
+
+
+class FaceLandmarksDataset(Dataset):
+    """
+    PyTorch Dataset yielding (image_tensor, normalised_points) pairs.
+
+    On augmentation:
+      - Random rotation ±15°, scale [0.9, 1.1], translation ±10 px,
+        applied to BOTH image and landmarks via the same affine matrix.
+      - Random horizontal flip with landmark index swap (eyes 0<->1,
+        mouth 3<->4, nose 2 stays).
+      - Brightness/contrast jitter on the image only.
+
+    All random ops are deterministic given a seed, except dataset-level
+    randomness which uses PyTorch's RNG.
+
+    :param images: (N, H, W, 3) uint8.
+    :param points: (N, 5, 2) pixel coordinates.
+    :param augment: whether to apply augmentation (False for val/test).
+    """
+
+    def __init__(self,
+                 images: np.ndarray,
+                 points: np.ndarray,
+                 augment: bool = False) -> None:
+        self.images = images
+        self.points = points
+        self.augment = augment
+        self.image_size = config.IMAGE_SIZE
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def _apply_affine(self, image: np.ndarray, pts: np.ndarray
+                      ) -> Tuple[np.ndarray, np.ndarray]:
+        """Random rotation + scale + translation on both image and points."""
+        import cv2
+        H, W = image.shape[:2]
+        cx, cy = W / 2, H / 2
+
+        angle = float(np.random.uniform(-15.0, 15.0))
+        scale = float(np.random.uniform(0.9, 1.1))
+        tx    = float(np.random.uniform(-10.0, 10.0))
+        ty    = float(np.random.uniform(-10.0, 10.0))
+
+        # cv2 builds a 2x3 matrix that maps (x,y,1) -> (x',y')
+        M = cv2.getRotationMatrix2D((cx, cy), angle, scale)
+        M[0, 2] += tx
+        M[1, 2] += ty
+
+        image_aug = cv2.warpAffine(image, M, (W, H), borderMode=cv2.BORDER_REFLECT)
+
+        # Apply to points: pts_out = M[:2, :2] @ pts + M[:, 2]
+        pts_h = np.hstack([pts, np.ones((len(pts), 1))])  # (5, 3)
+        pts_aug = (M @ pts_h.T).T  # (5, 2)
+        return image_aug, pts_aug
+
+    def _apply_flip(self, image: np.ndarray, pts: np.ndarray
+                    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Horizontal flip; reorders landmarks so they remain consistent."""
+        H, W = image.shape[:2]
+        image_flip = image[:, ::-1, :].copy()
+        pts_flip = pts.copy()
+        pts_flip[:, 0] = (W - 1) - pts_flip[:, 0]   # mirror x
+        pts_flip = pts_flip[list(config.FLIP_INDICES)]  # swap eyes & mouth
+        return image_flip, pts_flip
+
+    def _apply_jitter(self, image: np.ndarray) -> np.ndarray:
+        """Brightness ±20% and contrast ±20% in normalised float."""
+        f = image.astype(np.float32) / 255.0
+        brightness = np.random.uniform(-0.2, 0.2)
+        contrast = np.random.uniform(0.8, 1.2)
+        f = (f - 0.5) * contrast + 0.5 + brightness
+        f = np.clip(f, 0, 1)
+        return (f * 255).astype(np.uint8)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        image = self.images[idx].copy()
+        pts = self.points[idx].astype(np.float32).copy()
+
+        if self.augment:
+            if np.random.rand() < 0.8:
+                image, pts = self._apply_affine(image, pts)
+            if np.random.rand() < 0.5:
+                image, pts = self._apply_flip(image, pts)
+            if np.random.rand() < 0.5:
+                image = self._apply_jitter(image)
+
+        # Normalise image: uint8 [0,255] -> float [0,1] -> standardised
+        f = image.astype(np.float32) / 255.0
+        for c in range(3):
+            f[..., c] = (f[..., c] - config.NORMALISE_MEAN[c]) / config.NORMALISE_STD[c]
+        # HWC -> CHW
+        image_t = torch.from_numpy(f.transpose(2, 0, 1))
+
+        # Normalise points to [-1, 1]
+        pts_norm = (pts - self.image_size / 2) / (self.image_size / 2)
+        pts_t = torch.from_numpy(pts_norm)
+
+        return image_t, pts_t
