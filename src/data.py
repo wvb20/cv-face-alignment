@@ -95,10 +95,18 @@ class FaceLandmarksDataset(Dataset):
         H, W = image.shape[:2]
         cx, cy = W / 2, H / 2
 
-        angle = float(np.random.uniform(-15.0, 15.0))
-        scale = float(np.random.uniform(0.9, 1.1))
-        tx    = float(np.random.uniform(-10.0, 10.0))
-        ty    = float(np.random.uniform(-10.0, 10.0))
+        
+        # Initial hyper parameters for training
+        #angle = float(np.random.uniform(-15.0, 15.0))
+        #scale = float(np.random.uniform(0.9, 1.1))
+        #tx    = float(np.random.uniform(-10.0, 10.0))
+        #ty    = float(np.random.uniform(-10.0, 10.0))
+
+        # First attempt at adjusting hyper paramters
+        angle = float(np.random.uniform(-10.0, 10.0))   # was -15, 15
+        scale = float(np.random.uniform(0.95, 1.05))    # was 0.9, 1.1
+        tx    = float(np.random.uniform(-5.0, 5.0))     # was -10, 10
+        ty    = float(np.random.uniform(-5.0, 5.0))     # was -10, 10
 
         # cv2 builds a 2x3 matrix that maps (x,y,1) -> (x',y')
         M = cv2.getRotationMatrix2D((cx, cy), angle, scale)
@@ -135,12 +143,22 @@ class FaceLandmarksDataset(Dataset):
         image = self.images[idx].copy()
         pts = self.points[idx].astype(np.float32).copy()
 
+        # Initial Hyperparameter Selection
+        #if self.augment:
+        #    if np.random.rand() < 0.8:
+        #        image, pts = self._apply_affine(image, pts)
+        #    if np.random.rand() < 0.5:
+        #        image, pts = self._apply_flip(image, pts)
+        #    if np.random.rand() < 0.5:
+        #        image = self._apply_jitter(image)
+
+        # First attempt at adjusting hyper paramters
         if self.augment:
-            if np.random.rand() < 0.8:
+            if np.random.rand() < 0.5:                  # was 0.8
                 image, pts = self._apply_affine(image, pts)
-            if np.random.rand() < 0.5:
+            if np.random.rand() < 0.5:                  # unchanged
                 image, pts = self._apply_flip(image, pts)
-            if np.random.rand() < 0.5:
+            if np.random.rand() < 0.3:                  # was 0.5
                 image = self._apply_jitter(image)
 
         # Normalise image: uint8 [0,255] -> float [0,1] -> standardised
