@@ -161,12 +161,18 @@ class FaceLandmarksDataset(Dataset):
             if np.random.rand() < 0.3:                  # was 0.5
                 image = self._apply_jitter(image)
 
-        # Normalise image: uint8 [0,255] -> float [0,1] -> standardised
-        f = image.astype(np.float32) / 255.0
-        for c in range(3):
-            f[..., c] = (f[..., c] - config.NORMALISE_MEAN[c]) / config.NORMALISE_STD[c]
-        # HWC -> CHW
-        image_t = torch.from_numpy(f.transpose(2, 0, 1))
+
+
+        # Normalise image: uint8 [0,255] -> float [0,1] -> standardised.
+        # Use np.float32 for the constants too — Python floats are 64-bit,
+        # which leaks float64 into the output and breaks MSELoss.
+        f = image.astype(np.float32) / np.float32(255.0)
+        mean = np.array(config.NORMALISE_MEAN, dtype=np.float32)
+        std  = np.array(config.NORMALISE_STD,  dtype=np.float32)
+        f = (f - mean) / std
+        # HWC -> CHW, force contiguous float32
+        image_t = torch.from_numpy(np.ascontiguousarray(f.transpose(2, 0, 1),
+                                                          dtype=np.float32))
 
         # Normalise points to [-1, 1] — explicit float32 cast prevents
         # dtype mismatch with the model's float32 output (MSELoss is strict)
