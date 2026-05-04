@@ -88,6 +88,16 @@ class FaceLandmarksDataset(Dataset):
     def __len__(self) -> int:
         return len(self.images)
 
+    @staticmethod
+    def _uniform(low: float, high: float) -> float:
+        """Use PyTorch RNG so DataLoader worker seeds control augmentation."""
+        return float(torch.empty((), dtype=torch.float32).uniform_(low, high).item())
+
+    @staticmethod
+    def _bernoulli(p: float) -> bool:
+        """Sample an event with probability p using the worker-local torch RNG."""
+        return bool(torch.rand((), dtype=torch.float32).item() < p)
+
     def _apply_affine(self, image: np.ndarray, pts: np.ndarray
                       ) -> Tuple[np.ndarray, np.ndarray]:
         """Random rotation + scale + translation on both image and points."""
@@ -103,10 +113,10 @@ class FaceLandmarksDataset(Dataset):
         #ty    = float(np.random.uniform(-10.0, 10.0))
 
         # First attempt at adjusting hyper paramters
-        angle = float(np.random.uniform(-10.0, 10.0))   # was -15, 15
-        scale = float(np.random.uniform(0.95, 1.05))    # was 0.9, 1.1
-        tx    = float(np.random.uniform(-5.0, 5.0))     # was -10, 10
-        ty    = float(np.random.uniform(-5.0, 5.0))     # was -10, 10
+        angle = self._uniform(-10.0, 10.0)   # was -15, 15
+        scale = self._uniform(0.95, 1.05)    # was 0.9, 1.1
+        tx    = self._uniform(-5.0, 5.0)     # was -10, 10
+        ty    = self._uniform(-5.0, 5.0)     # was -10, 10
 
         # cv2 builds a 2x3 matrix that maps (x,y,1) -> (x',y')
         M = cv2.getRotationMatrix2D((cx, cy), angle, scale)
@@ -133,8 +143,8 @@ class FaceLandmarksDataset(Dataset):
     def _apply_jitter(self, image: np.ndarray) -> np.ndarray:
         """Brightness ±20% and contrast ±20% in normalised float."""
         f = image.astype(np.float32) / 255.0
-        brightness = np.random.uniform(-0.2, 0.2)
-        contrast = np.random.uniform(0.8, 1.2)
+        brightness = self._uniform(-0.2, 0.2)
+        contrast = self._uniform(0.8, 1.2)
         f = (f - 0.5) * contrast + 0.5 + brightness
         f = np.clip(f, 0, 1)
         return (f * 255).astype(np.uint8)
@@ -154,11 +164,11 @@ class FaceLandmarksDataset(Dataset):
 
         # First attempt at adjusting hyper paramters
         if self.augment:
-            if np.random.rand() < 0.5:                  # was 0.8
+            if self._bernoulli(0.5):                    # was 0.8
                 image, pts = self._apply_affine(image, pts)
-            if np.random.rand() < 0.5:                  # unchanged
+            if self._bernoulli(0.5):                    # unchanged
                 image, pts = self._apply_flip(image, pts)
-            if np.random.rand() < 0.3:                  # was 0.5
+            if self._bernoulli(0.3):                    # was 0.5
                 image = self._apply_jitter(image)
 
 
@@ -180,4 +190,3 @@ class FaceLandmarksDataset(Dataset):
         pts_t = torch.from_numpy(pts_norm)
 
         return image_t, pts_t
-

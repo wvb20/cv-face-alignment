@@ -5,7 +5,6 @@ import numpy as np
 from sklearn.linear_model import Ridge
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 from . import config, features
@@ -136,16 +135,15 @@ class CascadedRidgeRegressor:
 
 class LandmarkCNN(nn.Module):
     """
-    Small convolutional network for direct landmark regression.
+    Convolutional regressor for direct landmark prediction.
 
     Predicts 5 landmarks × 2 coordinates = 10 outputs per image, in the
     normalised range [-1, 1] (relative to image centre, scaled by half-image).
 
-    Architecture: 4 conv blocks (Conv-BN-ReLU-MaxPool) reducing 256→16,
-    global average pool, two FC layers with dropout. ~500K parameters.
-
-    Designed to be compact enough to train in <30 min on a Colab T4
-    while having sufficient capacity for ~3K training images.
+    Key design choice: keep an 8x8 spatial grid all the way into the MLP head
+    and inject explicit x/y coordinate channels. For landmark regression we
+    need absolute position information; a pure global-average-pooled backbone
+    tends to collapse to predicting the mean face for every image.
     """
 
     def __init__(self, n_landmarks: int = 5, dropout: float = 0.0) -> None:
@@ -158,47 +156,66 @@ class LandmarkCNN(nn.Module):
                 nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
                 nn.BatchNorm2d(out_c),
                 nn.ReLU(inplace=True),
+                nn.Conv2d(out_c, out_c, kernel_size=3, padding=1),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
             )
 
         self.features = nn.Sequential(
-            block(3,   32),
+            block(5,   32),
             block(32,  64),
             block(64,  128),
             block(128, 256),
         )
-        self.pool = nn.AdaptiveAvgPool2d(1)
+
+        self.spatial_head = nn.Sequential(
+            nn.Conv2d(256, 64, kernel_size=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d((8, 8)),
+        )
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(256, 256),
+            nn.Linear(64 * 8 * 8, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(256, out_dim),
         )
 
-        # Bias-initialise the final layer so the network starts predicting the
-        # mean shape from epoch 1. Without this, the network finds the trivial
-        # local minimum of "predict mean for everything" and gets stuck there.
-        # By starting at the mean, the only way to reduce loss is to learn
-        # image-conditional residuals.
+        # Start near the dataset mean shape, but keep the default weight
+        # initialisation so gradients can flow through the full network from
+        # the first optimisation step.
         final_linear = self.head[-1]
-        nn.init.zeros_(final_linear.weight)
-        mean_norm = np.array([
-            -0.375, -0.187,    # right eye  (80, 104) -> normalised
-            0.375, -0.195,    # left eye   (176, 103)
-            0.008,  0.117,    # nose       (129, 143)
-            -0.227,  0.383,    # right mouth (99, 177)
-            0.250,  0.375,    # left mouth (160, 176)
-        ], dtype=np.float32)
+        mean_norm = np.zeros(out_dim, dtype=np.float32)
+        if n_landmarks == 5:
+            mean_norm = np.array([
+                -0.375, -0.187,   # right eye  (80, 104) -> normalised
+                0.375, -0.195,    # left eye   (176, 103)
+                0.008,  0.117,    # nose       (129, 143)
+                -0.227,  0.383,   # right mouth (99, 177)
+                0.250,  0.375,    # left mouth (160, 176)
+            ], dtype=np.float32)
         with torch.no_grad():
             final_linear.bias.copy_(torch.from_numpy(mean_norm))
+
+    @staticmethod
+    def _coordinate_channels(x: torch.Tensor) -> torch.Tensor:
+        """Return per-pixel x/y channels in [-1, 1] for CoordConv-style input."""
+        b, _, h, w = x.shape
+        yy = torch.linspace(-1.0, 1.0, steps=h, device=x.device, dtype=x.dtype)
+        xx = torch.linspace(-1.0, 1.0, steps=w, device=x.device, dtype=x.dtype)
+        yy = yy.view(1, 1, h, 1).expand(b, 1, h, w)
+        xx = xx.view(1, 1, 1, w).expand(b, 1, h, w)
+        return torch.cat([xx, yy], dim=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """:param x: (B, 3, H, W) float in roughly [-2, 2] (post-normalisation)
         :return: (B, n_landmarks, 2) predictions in normalised [-1, 1] coords
         """
+        x = torch.cat([x, self._coordinate_channels(x)], dim=1)
         x = self.features(x)
-        x = self.pool(x)
+        x = self.spatial_head(x)
         x = self.head(x)
         return x.view(-1, self.n_landmarks, 2)
 

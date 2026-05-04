@@ -1,16 +1,59 @@
 """Project-wide constants and configuration."""
 
+import os
 from pathlib import Path
 
-# --- Paths (relative to project root in Colab) ---
-DRIVE_PROJECT_DIR = '/content/drive/MyDrive/cv-face-alignment'
-DATA_DIR          = f'{DRIVE_PROJECT_DIR}/data'
-FIGURES_DIR       = f'{DRIVE_PROJECT_DIR}/figures'
-CHECKPOINTS_DIR   = f'{DRIVE_PROJECT_DIR}/checkpoints'
 
-TRAIN_NPZ = f'{DATA_DIR}/face_alignment_training_images.npz'
-TEST_NPZ  = f'{DATA_DIR}/face_alignment_test_images.npz'
-SPLIT_NPZ = f'{DATA_DIR}/train_val_split.npz'
+def _in_colab() -> bool:
+    """Return True when running inside Google Colab."""
+    try:
+        import google.colab  # type: ignore
+        return True
+    except ImportError:
+        return False
+
+
+IN_COLAB = _in_colab()
+REPO_ROOT = Path(
+    os.environ.get("CV_FACE_ALIGNMENT_REPO_ROOT",
+                   Path(__file__).resolve().parents[1])
+).expanduser().resolve()
+
+
+def _default_workspace_dir() -> Path:
+    """Pick a persistent workspace for outputs and datasets."""
+    if IN_COLAB:
+        return Path('/content/drive/MyDrive/cv-face-alignment')
+    return REPO_ROOT
+
+
+PROJECT_DIR = Path(
+    os.environ.get("CV_FACE_ALIGNMENT_WORKSPACE_DIR",
+                   _default_workspace_dir())
+).expanduser().resolve()
+
+
+def ensure_workspace_dirs() -> None:
+    """Create the workspace subdirectories used across notebooks."""
+    for directory in (
+        PROJECT_DIR / 'data',
+        PROJECT_DIR / 'figures',
+        PROJECT_DIR / 'checkpoints',
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+ensure_workspace_dirs()
+
+# Backward-compatible aliases: older notebooks still refer to DRIVE_PROJECT_DIR.
+DRIVE_PROJECT_DIR = str(PROJECT_DIR)
+DATA_DIR          = str(PROJECT_DIR / 'data')
+FIGURES_DIR       = str(PROJECT_DIR / 'figures')
+CHECKPOINTS_DIR   = str(PROJECT_DIR / 'checkpoints')
+
+TRAIN_NPZ = str(Path(DATA_DIR) / 'face_alignment_training_images.npz')
+TEST_NPZ  = str(Path(DATA_DIR) / 'face_alignment_test_images.npz')
+SPLIT_NPZ = str(Path(DATA_DIR) / 'train_val_split.npz')
 
 # --- Dataset constants (verified empirically in 01_eda.ipynb) ---
 IMAGE_SIZE     = 256
