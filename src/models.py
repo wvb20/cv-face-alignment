@@ -176,22 +176,22 @@ class LandmarkCNN(nn.Module):
             nn.Linear(256, out_dim),
         )
 
-        # Bias-initialise the final layer to predict the mean shape from epoch 0.
-        # This breaks the trivial "predict mean for everything" local minimum
-        # by making the network start there — any further loss reduction must
-        # come from learning to read the image.
+        # Bias-initialise the final layer so the network starts predicting the
+        # mean shape from epoch 1. Without this, the network finds the trivial
+        # local minimum of "predict mean for everything" and gets stuck there.
+        # By starting at the mean, the only way to reduce loss is to learn
+        # image-conditional residuals.
         final_linear = self.head[-1]
         nn.init.zeros_(final_linear.weight)
         mean_norm = np.array([
-            -0.375, -0.187,    # right eye
-            0.375, -0.195,    # left eye
-            0.008,  0.117,    # nose
-            -0.227,  0.383,    # right mouth
-            0.250,  0.375,    # left mouth
+            -0.375, -0.187,    # right eye  (80, 104) -> normalised
+            0.375, -0.195,    # left eye   (176, 103)
+            0.008,  0.117,    # nose       (129, 143)
+            -0.227,  0.383,    # right mouth (99, 177)
+            0.250,  0.375,    # left mouth (160, 176)
         ], dtype=np.float32)
         with torch.no_grad():
             final_linear.bias.copy_(torch.from_numpy(mean_norm))
-
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """:param x: (B, 3, H, W) float in roughly [-2, 2] (post-normalisation)
