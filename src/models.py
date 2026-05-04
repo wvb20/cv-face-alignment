@@ -148,7 +148,7 @@ class LandmarkCNN(nn.Module):
     while having sufficient capacity for ~3K training images.
     """
 
-    def __init__(self, n_landmarks: int = 5, dropout: float = 0.3) -> None:
+    def __init__(self, n_landmarks: int = 5, dropout: float = 0.0) -> None:
         super().__init__()
         self.n_landmarks = n_landmarks
         out_dim = n_landmarks * 2
@@ -162,12 +162,12 @@ class LandmarkCNN(nn.Module):
             )
 
         self.features = nn.Sequential(
-            block(3,   32),    # 256 -> 128
-            block(32,  64),    # 128 -> 64
-            block(64,  128),   # 64 -> 32
-            block(128, 256),   # 32 -> 16
+            block(3,   32),
+            block(32,  64),
+            block(64,  128),
+            block(128, 256),
         )
-        self.pool = nn.AdaptiveAvgPool2d(1)  # 16x16 -> 1x1
+        self.pool = nn.AdaptiveAvgPool2d(1)
         self.head = nn.Sequential(
             nn.Flatten(),
             nn.Linear(256, 256),
@@ -175,6 +175,23 @@ class LandmarkCNN(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(256, out_dim),
         )
+
+        # Bias-initialise the final layer to predict the mean shape from epoch 0.
+        # This breaks the trivial "predict mean for everything" local minimum
+        # by making the network start there — any further loss reduction must
+        # come from learning to read the image.
+        final_linear = self.head[-1]
+        nn.init.zeros_(final_linear.weight)
+        mean_norm = np.array([
+            -0.375, -0.187,    # right eye
+            0.375, -0.195,    # left eye
+            0.008,  0.117,    # nose
+            -0.227,  0.383,    # right mouth
+            0.250,  0.375,    # left mouth
+        ], dtype=np.float32)
+        with torch.no_grad():
+            final_linear.bias.copy_(torch.from_numpy(mean_norm))
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """:param x: (B, 3, H, W) float in roughly [-2, 2] (post-normalisation)

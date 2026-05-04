@@ -181,5 +181,3 @@ class FaceLandmarksDataset(Dataset):
 
         return image_t, pts_t
 
-
-        return image_t, pts_t
