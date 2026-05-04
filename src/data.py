@@ -37,4 +37,14 @@ def get_split() -> Tuple[np.ndarray, np.ndarray]:
 
     :return: (train_idx, val_idx) — index arrays into the training set.
     """
-    raise NotImplementedError('Implemented in 01_eda.ipynb; move it here.')
+    import os
+    if os.path.exists(config.SPLIT_NPZ):
+        split = np.load(config.SPLIT_NPZ)
+        return split['train_idx'], split['val_idx']
+
+    rng = np.random.default_rng(seed=config.RANDOM_SEED)
+    perm = rng.permutation(config.N_TRAIN)
+    n_val = int(config.VAL_FRACTION * config.N_TRAIN)
+    val_idx, train_idx = perm[:n_val], perm[n_val:]
+    np.savez(config.SPLIT_NPZ, train_idx=train_idx, val_idx=val_idx)
+    return train_idx, val_idx

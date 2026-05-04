@@ -9,7 +9,7 @@ def euclid_dist(pred_pts: np.ndarray, gt_pts: np.ndarray) -> np.ndarray:
     """
     Calculate the Euclidean distance between pairs of points.
 
-    Provided by the assignment brief — kept as-is.
+    Provided with the assignment 
 
     :param pred_pts: predicted points, shape (N, 2) or flat (2N,).
     :param gt_pts:   ground truth points, same shape.
@@ -20,6 +20,14 @@ def euclid_dist(pred_pts: np.ndarray, gt_pts: np.ndarray) -> np.ndarray:
     return np.sqrt(np.sum(np.square(pred_pts - gt_pts), axis=-1))
 
 
+
+
+
+
+
+
+
+
 def inter_ocular_distance(points: np.ndarray) -> np.ndarray:
     """
     Compute inter-ocular distance for each face in a batch.
@@ -27,7 +35,7 @@ def inter_ocular_distance(points: np.ndarray) -> np.ndarray:
     :param points: (N, 5, 2) ground-truth landmark array.
     :return: (N,) array of distances between landmark 0 and landmark 1.
     """
-    raise NotImplementedError
+    return np.linalg.norm(points[:, 1, :] - points[:, 0, :], axis=1)
 
 
 def nme(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
@@ -40,20 +48,25 @@ def nme(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
     :param gt:   (N, 5, 2) ground-truth landmarks.
     :return: (N,) array of per-image NMEs (unitless, typically 0.01–0.20).
     """
-    raise NotImplementedError
+    # Per-image, per-landmark Euclidean distance
+    per_lm_err = np.linalg.norm(pred - gt, axis=2)            # (N, 5)
+    iod = inter_ocular_distance(gt)                            # (N,)
+    # Mean over landmarks, normalised by IOD
+    return per_lm_err.mean(axis=1) / iod                       # (N,)
 
 
-def cumulative_error_distribution(errors: np.ndarray
-                                   ) -> tuple[np.ndarray, np.ndarray]:
+def cumulative_error_distribution(errors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Return (sorted_errors, cumulative_fractions) for plotting a CED curve.
 
     :param errors: (N,) array of per-image errors (e.g. NMEs).
     :return: (x, y) arrays for plt.step / plt.plot.
     """
-    raise NotImplementedError
+    sorted_errors = np.sort(errors)
+    cumulative = np.linspace(0.0, 1.0, len(errors), endpoint=True)
+    return sorted_errors, cumulative
 
 
 def failure_rate(errors: np.ndarray, threshold: float = 0.10) -> float:
     """Fraction of images with error above the threshold (default 10%)."""
-    raise NotImplementedError
+    return float((errors > threshold).mean())
