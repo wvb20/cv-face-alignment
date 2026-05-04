@@ -168,8 +168,12 @@ class FaceLandmarksDataset(Dataset):
         # HWC -> CHW
         image_t = torch.from_numpy(f.transpose(2, 0, 1))
 
-        # Normalise points to [-1, 1]
-        pts_norm = (pts - self.image_size / 2) / (self.image_size / 2)
+        # Normalise points to [-1, 1] — explicit float32 cast prevents
+        # dtype mismatch with the model's float32 output (MSELoss is strict)
+        pts_norm = ((pts - self.image_size / 2) / (self.image_size / 2)).astype(np.float32)
         pts_t = torch.from_numpy(pts_norm)
+
+        return image_t, pts_t
+
 
         return image_t, pts_t
