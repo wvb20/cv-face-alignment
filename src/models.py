@@ -196,8 +196,12 @@ class LandmarkCNN(nn.Module):
                 -0.227,  0.383,   # right mouth (99, 177)
                 0.250,  0.375,    # left mouth (160, 176)
             ], dtype=np.float32)
+
+        # The network predicts normalised coordinates, so bound the final
+        # output with tanh and initialise the pre-activation bias accordingly.
+        mean_pre_tanh = np.arctanh(np.clip(mean_norm, -0.999, 0.999))
         with torch.no_grad():
-            final_linear.bias.copy_(torch.from_numpy(mean_norm))
+            final_linear.bias.copy_(torch.from_numpy(mean_pre_tanh))
 
     @staticmethod
     def _coordinate_channels(x: torch.Tensor) -> torch.Tensor:
@@ -217,6 +221,7 @@ class LandmarkCNN(nn.Module):
         x = self.features(x)
         x = self.spatial_head(x)
         x = self.head(x)
+        x = torch.tanh(x)
         return x.view(-1, self.n_landmarks, 2)
 
 
@@ -236,4 +241,5 @@ def points_to_normalised(points: np.ndarray, image_size: int) -> np.ndarray:
 
 def points_to_pixels(norm_points: np.ndarray, image_size: int) -> np.ndarray:
     """Inverse of points_to_normalised."""
+    norm_points = np.clip(norm_points, -1.0, 1.0)
     return norm_points * (image_size / 2) + image_size / 2

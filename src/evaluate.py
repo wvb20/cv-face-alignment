@@ -42,10 +42,13 @@ def nme(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
     :return: (N,) array of per-image NMEs (unitless, typically 0.01–0.20).
     """
     # Per-image, per-landmark Euclidean distance
+    pred = np.nan_to_num(pred, nan=0.0, posinf=config.IMAGE_SIZE, neginf=0.0)
+    gt = np.nan_to_num(gt, nan=0.0, posinf=config.IMAGE_SIZE, neginf=0.0)
     per_lm_err = np.linalg.norm(pred - gt, axis=2)            # (N, 5)
-    iod = inter_ocular_distance(gt)                            # (N,)
+    iod = np.clip(inter_ocular_distance(gt), 1e-6, None)      # (N,)
     # Mean over landmarks, normalised by IOD
-    return per_lm_err.mean(axis=1) / iod                       # (N,)
+    errors = per_lm_err.mean(axis=1) / iod                    # (N,)
+    return np.nan_to_num(errors, nan=np.inf, posinf=np.inf, neginf=np.inf)
 
 
 def cumulative_error_distribution(errors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
