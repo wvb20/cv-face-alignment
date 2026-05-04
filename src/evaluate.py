@@ -1,7 +1,6 @@
 """Error metrics — NME, CED, and the assignment-provided euclid_dist."""
 
 import numpy as np
-
 from . import config
 
 
@@ -22,15 +21,9 @@ def euclid_dist(pred_pts: np.ndarray, gt_pts: np.ndarray) -> np.ndarray:
 
 
 
-
-
-
-
-
-
 def inter_ocular_distance(points: np.ndarray) -> np.ndarray:
     """
-    Compute inter-ocular distance for each face in a batch.
+    Compute distance between eyes for each face in a batch.
 
     :param points: (N, 5, 2) ground-truth landmark array.
     :return: (N,) array of distances between landmark 0 and landmark 1.
