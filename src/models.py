@@ -151,13 +151,18 @@ class LandmarkCNN(nn.Module):
         self.n_landmarks = n_landmarks
         out_dim = n_landmarks * 2
 
+        def norm(channels: int) -> nn.Module:
+            # GroupNorm is batch-size agnostic and tends to be more stable than
+            # BatchNorm for small local batches, especially on MPS backends.
+            return nn.GroupNorm(8, channels)
+
         def block(in_c, out_c):
             return nn.Sequential(
                 nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
-                nn.BatchNorm2d(out_c),
+                norm(out_c),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(out_c, out_c, kernel_size=3, padding=1),
-                nn.BatchNorm2d(out_c),
+                norm(out_c),
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
             )
@@ -171,7 +176,7 @@ class LandmarkCNN(nn.Module):
 
         self.spatial_head = nn.Sequential(
             nn.Conv2d(256, 64, kernel_size=1),
-            nn.BatchNorm2d(64),
+            norm(64),
             nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d((8, 8)),
         )
