@@ -152,82 +152,53 @@ class LandmarkCNN(nn.Module):
         out_dim = n_landmarks * 2
 
         def norm(channels: int) -> nn.Module:
-            # GroupNorm is batch-size agnostic and tends to be more stable than
-            # BatchNorm for small local batches, especially on MPS backends.
             return nn.GroupNorm(8, channels)
 
         def block(in_c, out_c):
+            # Single conv per stage (was two) — halves compute
             return nn.Sequential(
                 nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
-                norm(out_c),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(out_c, out_c, kernel_size=3, padding=1),
                 norm(out_c),
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
             )
 
+        # Input has 5 channels: 3 RGB + 2 coord channels (CoordConv)
         self.features = nn.Sequential(
-            block(5,   32),
-            block(32,  64),
-            block(64,  128),
-            block(128, 256),
+            block(5,   32),    # 256 -> 128
+            block(32,  64),    # 128 -> 64
+            block(64,  128),   # 64 -> 32
+            block(128, 192),   # 32 -> 16  (was 256)
         )
 
         self.spatial_head = nn.Sequential(
-            nn.Conv2d(256, 64, kernel_size=1),
+            nn.Conv2d(192, 64, kernel_size=1),
             norm(64),
             nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((8, 8)),
+            nn.AdaptiveAvgPool2d((4, 4)),   # 4x4 (was 8x8) — quarters head params
         )
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(64 * 8 * 8, 256),
+            nn.Linear(64 * 4 * 4, 256),     # 1024 input (was 4096)
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(256, out_dim),
         )
 
-        # Start near the dataset mean shape, but keep the default weight
-        # initialisation so gradients can flow through the full network from
-        # the first optimisation step.
+        # Bias init at the mean shape (unchanged)
         final_linear = self.head[-1]
         mean_norm = np.zeros(out_dim, dtype=np.float32)
         if n_landmarks == 5:
             mean_norm = np.array([
-                -0.375, -0.187,   # right eye  (80, 104) -> normalised
-                0.375, -0.195,    # left eye   (176, 103)
-                0.008,  0.117,    # nose       (129, 143)
-                -0.227,  0.383,   # right mouth (99, 177)
-                0.250,  0.375,    # left mouth (160, 176)
+                -0.375, -0.187,
+                0.375, -0.195,
+                0.008,  0.117,
+                -0.227,  0.383,
+                0.250,  0.375,
             ], dtype=np.float32)
-
-        # The network predicts normalised coordinates, so bound the final
-        # output with tanh and initialise the pre-activation bias accordingly.
         mean_pre_tanh = np.arctanh(np.clip(mean_norm, -0.999, 0.999))
         with torch.no_grad():
             final_linear.bias.copy_(torch.from_numpy(mean_pre_tanh))
-
-    @staticmethod
-    def _coordinate_channels(x: torch.Tensor) -> torch.Tensor:
-        """Return per-pixel x/y channels in [-1, 1] for CoordConv-style input."""
-        b, _, h, w = x.shape
-        yy = torch.linspace(-1.0, 1.0, steps=h, device=x.device, dtype=x.dtype)
-        xx = torch.linspace(-1.0, 1.0, steps=w, device=x.device, dtype=x.dtype)
-        yy = yy.view(1, 1, h, 1).expand(b, 1, h, w)
-        xx = xx.view(1, 1, 1, w).expand(b, 1, h, w)
-        return torch.cat([xx, yy], dim=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """:param x: (B, 3, H, W) float in roughly [-2, 2] (post-normalisation)
-        :return: (B, n_landmarks, 2) predictions in normalised [-1, 1] coords
-        """
-        x = torch.cat([x, self._coordinate_channels(x)], dim=1)
-        x = self.features(x)
-        x = self.spatial_head(x)
-        x = self.head(x)
-        x = torch.tanh(x)
-        return x.view(-1, self.n_landmarks, 2)
 
 
 def points_to_normalised(points: np.ndarray, image_size: int) -> np.ndarray:
