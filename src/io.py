@@ -1,4 +1,4 @@
-"""File I/O — including the assignment-provided save_as_csv."""
+"""File I/O — assignment-provided save_as_csv."""
 
 from pathlib import Path
 import numpy as np
