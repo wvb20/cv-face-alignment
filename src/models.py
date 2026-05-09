@@ -17,6 +17,7 @@ from . import config, features
 class CascadedRidgeRegressor:
     """
     Cascaded linear regressor for face alignment (Supervised Descent Method).
+    See Lesson 5, Supervised Descent for reference.
 
     Each stage k computes SIFT descriptors at the current shape estimate
     p_{k-1}, predicts an update Δp_k via a Ridge regressor trained on
@@ -111,14 +112,18 @@ class LandmarkCNN(nn.Module):
     Predicts 5 landmarks × 2 coordinates = 10 outputs per image, in the
     normalised range [-1, 1] (relative to image centre, scaled by half-image).
 
-    Key design choices:
-      - CoordConv: x/y coordinate channels concatenated to RGB so conv
-        filters have access to absolute position information. Without
-        this, regression CNNs collapse to mean-shape predictions because
-        their features are translation-equivariant.
-      - GroupNorm not BatchNorm: stable for the small batch sizes we use.
+    Key design changes / considerations:
+      - CoordConv addition: x/y coordinate channels concatenated to RGB so conv
+        filters have access to absolute position information. 
+      - Previous simple model was collapsing to mean-shape predictions because
+        their features are translation-equivariant, meaning that there was very 
+        little spatial information of their location in the image being considered
+        in the simpler model.
+      - GroupNorm not BatchNorm: stable for the small batch sizes we use, otherwise
+        again the model was collapsing to mean-shape predictions 
       - Tanh output bounded to [-1, 1] with bias initialised so the
-        network starts predicting the dataset mean shape on epoch 0.
+        network starts predicting the dataset mean shape on epoch 0, matching
+        outputs to the earlier Cascade model for ease of comparison.
     """
 
     def __init__(self, n_landmarks: int = 5, dropout: float = 0.0) -> None:
@@ -130,7 +135,7 @@ class LandmarkCNN(nn.Module):
             return nn.GroupNorm(8, channels)
 
         def block(in_c, out_c):
-            """Single conv + norm + ReLU + maxpool — slim to keep MPS fast."""
+            """Single conv + norm + ReLU + maxpool."""
             return nn.Sequential(
                 nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
                 norm(out_c),
@@ -139,6 +144,9 @@ class LandmarkCNN(nn.Module):
             )
 
         # Input is 5 channels: 3 RGB + 2 coord channels (CoordConv)
+        # This was originally just the 3 RGB channels but the lack of
+        # Spatial information in the model was resulting in poor predictions
+        # that collapsed to the mean-shape.
         self.features = nn.Sequential(
             block(5,   32),    # 256 -> 128
             block(32,  64),    # 128 -> 64
@@ -156,11 +164,11 @@ class LandmarkCNN(nn.Module):
             nn.Flatten(),
             nn.Linear(64 * 4 * 4, 256),
             nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
+            #nn.Dropout(dropout),
             nn.Linear(256, out_dim),
         )
 
-        # Bias-init the final linear so the network's epoch-0 prediction
+        # Bias-init the final linear so the network's prediction
         # is the dataset mean shape — forces it to learn image residuals
         # rather than collapsing to the trivial mean.
         final_linear = self.head[-1]
@@ -191,6 +199,7 @@ class LandmarkCNN(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """:param x: (B, 3, H, W) post-normalisation float tensor.
         :return: (B, n_landmarks, 2) predictions in normalised [-1, 1] coords.
+        This outputs to the same format as the cascade model for ease of comparison. 
         """
         # Defensive NaN guard for cv2.warpAffine edge cases
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)

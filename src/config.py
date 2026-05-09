@@ -45,8 +45,6 @@ def ensure_workspace_dirs() -> None:
 
 ensure_workspace_dirs()
 
-# Backward-compatible aliases: older notebooks still refer to DRIVE_PROJECT_DIR.
-DRIVE_PROJECT_DIR = str(PROJECT_DIR)
 DATA_DIR          = str(PROJECT_DIR / 'data')
 FIGURES_DIR       = str(PROJECT_DIR / 'figures')
 CHECKPOINTS_DIR   = str(PROJECT_DIR / 'checkpoints')
