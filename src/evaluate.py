@@ -33,7 +33,7 @@ def inter_ocular_distance(points: np.ndarray) -> np.ndarray:
 
 def nme(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
     """
-    Normalised Mean Error per image, normalised by inter-ocular distance.
+    Normalised Mean Error per image, normalised by inter-ocular distance (IOD).
 
     NME_i = mean over landmarks of euclidean distance / IOD_i.
 
