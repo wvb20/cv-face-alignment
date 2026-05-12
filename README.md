@@ -10,4 +10,4 @@ University of Sussex 996G5A Computer Vision module.
 - `report/` — coursework report
 
 ## Status
-Work in progress.
+Final Version
